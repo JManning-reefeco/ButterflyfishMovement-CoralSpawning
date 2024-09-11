@@ -1,0 +1,627 @@
+---
+title: "CCAP_Spawning"
+author: "Joshua Manning"
+date: '2023-05-22'
+output: html_document
+---
+##Load Packages##
+
+Movement and spatial data packages
+```{r}
+library(plotKML)
+library(adehabitatLT)
+library(adehabitatHR)
+library(lubridate)
+library(raster)
+library(rworldmap)
+library(sp)
+library(dplyr)
+library(tidyr)
+library(rmapshaper)
+library(rgeos)
+library(Rmisc)
+library(conflicted)
+```
+
+Plotting
+Remember you need to load your Google API key to use ggmap and ggmap styles
+```{r}
+library(ggplot2) # tidyverse vis package
+library(ggmap) #use this for plotting maps
+library(ggspatial) #add scale bar and north arrow
+library(sf)
+library(wesanderson)
+```
+
+Analyses
+```{r}
+library(rstatix) ##For normality and homogeneity of variance tests
+library(car) ##For type III ANOVA
+library(vegan) ##PERMANOVA and ordination
+library(glmmTMB) ##generalized linear mixed models
+library(GGally) ##correlograms 
+library(DHARMa)
+library(performance)
+library(multcomp)
+```
+
+Resolve conflicts
+```{r}
+conflict_prefer("rename", "dplyr")
+conflict_prefer("group_by", "dplyr")
+conflict_prefer("filter", "dplyr")
+conflict_prefer("summarise", "dplyr")
+conflict_prefer("select", "dplyr")
+conflict_prefer("mutate", "dplyr")
+conflict_prefer("count", "dplyr")
+conflict_prefer("mcp", "adehabitatHR")
+```
+
+
+##Analyses of Movement Data
+
+Create a data frame for all of the tracks from all of the dates (ONLY DO THIS IF NEW DATA ADDED)
+
+First, set the working directory to the path where the raw butterflyfish GPS tracks are:
+
+```{r eval = F}
+getwd()
+setwd("D:\\PhD\\Manuscripts\\Butterflyfish-Movement-Coral-Spawning\\Data\\NewVisitation")
+``` 
+
+Now process and bind all GPS files into one data frame
+
+```{r eval = F}
+files <- dir(pattern = "\\.gpx")
+out <- lapply(files, function(x) readGPX(x, metadata = F, bounds = F, waypoints = F, tracks = T, routes = F))
+names(out) <- files
+
+ccap.move <- lapply(out, function(x) bind_rows(x$tracks[[1]][[1]], .id = "column_label"))
+ccap.movement <- bind_rows(ccap.move, .id="column_label") %>%
+  rename(ID = column_label)
+
+write.csv(ccap.movement, "D:\\PhD\\Manuscripts\\Butterflyfish - Movement&CoralSpawning\\Data\\ccap.movement.csv", row.names = F)
+```
+
+Set the working directory to Outputs folder
+
+```{r}
+getwd()
+setwd("D:\\PhD\\Manuscripts\\Butterflyfish-Movement-Coral-Spawning\\Outputs")
+```
+
+Read in and wrangle the data for the movement file I created above. 
+
+```{r}
+ccap <- read.csv("D:\\PhD\\Manuscripts\\Butterflyfish - Movement&CoralSpawning\\Data\\ccap.movement.csv")
+
+##separate the column in two at the T
+ccap.moving <- ccap %>% separate(time, c("Date","Time"), sep = c("T"))
+ccap.moving$Time = substr(ccap.moving$Time,1,nchar(ccap.moving$Time)-1) ##remove last character (in this case the Z)
+
+ccapin <- unite(ccap.moving, "time", c(Date, Time), sep = " ", remove=T) %>%
+  separate(ID, c("Species", "Date", "Time", "Observer", "SpawnPeriod", "TimeFrame"), sep = "_", remove = F) %>%
+  separate(TimeFrame, c("TimeFrame", "file"), sep = "[.]") %>%
+  select(-file)
+```
+
+The next thing I will want to do is create a trajectory object.
+First I need to convert it to a SpatialPointsDataFrame. CRS can be set using CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs") or CRS(SRS_string="EPSG:4326"). The latter is preferred in the new system.
+
+```{r}
+proj4string = CRS(SRS_string="EPSG:4326") #use EPSG:4326 because this is the format the GPS receiver records data in
+proj4string
+
+loc.foc <- data.frame("x" = ccapin$lon, "y" = ccapin$lat)
+
+ccap.spdf <- SpatialPointsDataFrame(loc.foc, ccapin, proj4string = proj4string)
+```
+
+Convert CRS to UTM Zone 19 EPSG: 32619 for projection in Bonaire. Units in meters.
+
+```{r}
+ccap.spdf <- spTransform(ccap.spdf, CRS(SRS_string="EPSG:32619"))
+
+str(ccap.spdf)
+```
+
+Next create an ltraj object. There are two types of trajectories. Type 1: Locations only, with no time recorded. 
+I have a Type 2 trajectory, with time recorded. The time needs to be of class POSIXct object in order to convert to ltraj. 
+
+First, check that time is in the correct format and if the time is not in the correct format, convert it.
+
+```{r}
+ccap.spdf$time <- as.POSIXct(strptime(as.character(ccap.spdf$time), "%Y-%m-%d %H:%M:%S"))
+
+class(ccap.spdf$time)
+```
+
+
+Convert the data to the simple features format and check for stationarity of movement (Benhamou 2014) (STATIONARITY OUTPUTS ARE ALREADY CREATED. DO NOT RUN AGAIN UNLESS NEEDED.)
+
+```{r eval = F}
+ccap.sf <- st_as_sf(ccap.spdf) %>%
+  mutate(Longitude = st_coordinates(.)[,1],
+         Latitude = st_coordinates(.)[,2])
+
+library(ggpubr)
+
+for(i in unique(ccap.sf$ID)){
+  glat <- ggplot(aes(x = time, y = Latitude), data = subset(ccap.sf, ID == i)) +
+    geom_line(color = "black") +
+    labs(y = "Northing", y = "") +
+    theme_classic()
+  glon <- ggplot(aes(x = time, y = Longitude), data = subset(ccap.sf, ID == i)) +
+    geom_line(color = "black") +
+    labs(y = "Easting", x = "Time (UTC)") +
+    theme_classic()
+  gi <- ggarrange(glat, glon,
+                     ncol = 1, nrow = 2, align = "v",
+                     font.label = list(size = 12, color = "black", face = "plain", family = "Arial"))
+  
+  ggsave(filename = sprintf('D:\\PhD\\Manuscripts\\Butterflyfish-Movement-Coral-Spawning\\Outputs\\Stationarity\\%s.png', i), plot = gi)
+}
+```
+
+
+Now create the ltraj object:
+The resulting object belongs to the classes ltraj and list. It is a list of data frames that should behave like any other list in R.
+
+```{r}
+ccap.tr <- as.ltraj(coordinates(ccap.spdf), date = ccap.spdf$time, id=ccap.spdf$ID, typeII = T)
+ccap.tr
+```
+
+
+#Summarize trajectory information for these fish
+
+```{r}
+ccap.tr.df <- ld(ccap.tr)
+ccap.tr.df$id <- as.factor(ccap.tr.df$id)
+
+ccap.tr.sum <- ccap.tr.df %>%
+  select(-burst, -pkey) %>%
+  group_by(id) %>%
+  summarise(n = n(),
+            totaltime = sum(dt, na.rm = T)/60,
+            totaldist = sum(dist, na.rm = T)) %>%
+  separate(id, c("Species", "Date", "Time", "Observer", "SpawnPeriod", "TimeFrame"), sep = "_", remove = F) %>%
+  separate(TimeFrame, c("TimeFrame", "file"), sep = "[.]") %>%
+  select(-file)
+
+ccap.tr.sum.all <- ccap.tr.df %>%
+  select(-burst, -pkey) %>%
+  group_by(id) %>%
+  summarise(n = n(),
+            totaltime = sum(dt, na.rm = T)/60,
+            totaldist = sum(dist, na.rm = T)) %>%
+  separate(id, c("Species", "Date", "Time", "Observer", "SpawnPeriod", "TimeFrame"), sep = "_", remove = F) %>%
+  separate(TimeFrame, c("TimeFrame", "file"), sep = "[.]") %>%
+  select(-file) %>%
+  group_by(SpawnPeriod) %>%
+  summarise(N = n(),
+            mRelocations = mean(n),
+            sdRelocations = sd(n),
+            mTime = mean(totaltime),
+            sdTime = sd(totaltime),
+            mDist = mean(totaldist),
+            sdDist = sd(totaldist)) %>%
+  mutate(across(mRelocations:sdDist, round, 2)) %>% 
+  unite("Mean (SD) Relocations", mRelocations:sdRelocations, sep = " \u00B1 ") %>% 
+  unite("Mean (SD) Time (min)", mTime:sdTime, sep = " \u00B1 ") %>%
+  unite("Mean (SD) Distance (m)", mDist:sdDist, sep = " \u00B1 ")
+ccap.tr.sum.all
+
+write.table(ccap.tr.sum.all, file = "tr.sum.all.txt",
+            sep = ",", quote = FALSE, row.names = F)
+```
+
+Plot distance traveled by spawning period
+
+```{r}
+dist.p <- ggplot(ccap.tr.sum %>%
+  mutate(name = factor(SpawnPeriod, levels = c("Baseline", "Prespawning", "SpawningPeak", "SpawningCusp"))),
+  aes(x = name, y = totaldist, color = name, fill = name)) +
+  geom_boxplot(outlier.size = 1, size = 0.5, alpha = 0.25) +
+  geom_point() +
+  theme_classic(base_family = "Arial") +
+  labs(x = "", y = expression(paste("Distance Traveled (m)"))) +
+  theme(text = element_text(color = "black"),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12),
+        legend.position = "none") +
+  scale_x_discrete(labels=c("Baseline" = "Baseline",
+                            "Prespawning" = "Pre-spawn", 
+                            "SpawningCusp" = "Cusp Spawn",
+                            "SpawningPeak" = "Peak Spawn")) +
+  scale_color_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete")) +
+  scale_fill_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete"))
+dist.p
+
+ggsave("dist.travel.png", plot = dist.p, 
+       type = 'cairo',
+       width = 4.5, height = 3.5, dpi = 300)
+```
+
+
+## Computation of home ranges ##
+
+
+Specify the parameters for the MKDE Brownian Bridge model. Calculate vv for each track and specify hmin as 1 per Simon's suggestion.
+
+```{r}
+ccap.vv <- BRB.D(ccap.tr, Tmax = 60, Lmin = 0)
+
+median(do.call(rbind.data.frame, ccap.vv)$D) #0.06
+
+hmin <- 1 #Simon Benhamou suggested setting this to 1m because it is unlikely that the sd of the accuracy of the GPS relocations was less than 1m
+```
+
+Estimate UD, using the diffusion parameter
+
+```{r}
+ccap.ud <- BRB(ccap.tr, D = ccap.vv, Tmax = 60, Lmin = 0, hmin=hmin, filtershort = F, grid = 300, same4all = T)
+
+#can also break down into recursion and intensity distributions, but this was not fruitful here.
+
+# ccap.rd <- BRB(ccap.tr, type = "RD", maxt = 20, radius = 3,
+#                D = ccap.vv, Tmax = 60, Lmin = 0, hmin=hmin, filtershort = F, grid = 300, same4all = T)
+# 
+# ccap.id <- BRB(ccap.tr, type = "ID", maxt = 20, radius = 3,
+#                D = ccap.vv, Tmax = 60, Lmin = 0, hmin=hmin, filtershort = F, grid = 300, same4all = T)
+
+
+conflict_prefer("id", "adehabitatLT")
+names(ccap.ud) <- id(ccap.tr)
+# names(ccap.rd) <- id(ccap.tr)
+# names(ccap.id) <- id(ccap.tr)
+```
+
+Estimate areas
+
+```{r}
+ccap.95 <- kernel.area(ccap.ud, percent = 95, unin = "m", unout = "m2")
+```
+
+Merge area dataframes
+
+```{r}
+ccap.mkde.95 <- pivot_longer(ccap.95, cols = c(1:ncol(ccap.95)), names_to = "id", values_to = "HR") %>%
+  separate(id, c("Species", "Date", "Time", "Observer", "SpawnPeriod", "TimeFrame"), sep = "_", remove = F)
+
+write.csv(ccap.mkde.95, file = "ccap.mkde.txt",
+          sep = ",", quote = FALSE, row.names = F)
+```
+
+Summarise
+
+```{r}
+ccap.mkde.sum <- ccap.mkde.95 %>%
+  group_by(SpawnPeriod) %>%
+  summarise(N = n(),
+            mHR = mean(HR),
+            sdHR = sd(HR)) %>%
+  mutate(across(mHR:sdHR, round, 2)) %>% 
+  unite("HR", mHR:sdHR, sep = " \u00B1 ")
+ccap.mkde.sum
+
+write.table(ccap.mkde.sum, file = "ccap.mkde.sum.txt",
+          sep = ",", quote = FALSE, row.names = F)
+```
+
+
+```{r}
+HR.p <- ggplot(ccap.mkde.95 %>%
+  mutate(name = factor(SpawnPeriod, levels = c("Baseline", "Prespawning", "SpawningPeak", "SpawningCusp"))),
+  aes(x = name, y=HR, color = name, fill = name)) +
+  geom_boxplot(outlier.size = 1, size = 0.5, alpha = 0.25) +
+  geom_point() +
+  theme_classic(base_family = "Arial") +
+  labs(x = "", y = expression(paste("Space Use (m " ^2,")"))) +
+  theme(text = element_text(color = "black"),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12),
+        legend.position = "none") +
+  scale_x_discrete(labels=c("Baseline" = "Baseline",
+                            "Prespawning" = "Pre-spawn",
+                            "SpawningPeak" = "Peak Spawn", 
+                            "SpawningCusp" = "Cusp Spawn")) +
+  scale_color_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete")) +
+  scale_fill_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete"))
+HR.p
+
+ggsave("HRsize.png", plot = HR.p, 
+       type = 'cairo',
+       width = 4.5, height = 3.5, dpi = 300)
+
+
+
+dist.HR.p <- ggarrange(dist.p, HR.p, ncol = 1, nrow = 2, labels = c("a", "b"), align = "v",
+                     font.label = list(size = 12, color = "black", face = "plain", family = "Arial"))
+dist.HR.p
+
+ggsave("DistHR.png", plot = dist.HR.p, 
+       type = 'cairo',
+       width = 4.5, height = 5.5, dpi = 300)
+```
+
+
+
+## Create Home Range Shapefiles
+
+First, use getvertices in the adehabitatHR package to get the countours for the computed home ranges. ONLY NEED TO RUN THIS AGAIN IF ADDING MORE OBSERVATIONS OR CHANGING PARAMETERS IN RANGE ESTIMATION
+
+```{r eval = F}
+ccap.ud95 <- getverticeshr(ccap.ud, percent = 95, unin = "m", unout = "m2")
+
+
+# Old code for recursion and intensity distributions
+# ccap.rd10 <- getverticeshr(ccap.rd, percent = 10, unin = "m", unout = "m2")
+# 
+# ccap.id10 <- getverticeshr(ccap.id, percent = 10, unin = "m", unout = "m2")
+```
+
+Now, generate the shapefiles
+
+```{r eval = F}
+library(tibble)
+
+proj4string(ccap.ud95) <- CRS(SRS_string="EPSG:32619") #add the UTM projection CRS to match the data
+
+#Convert to sf object using st_as_sf in the sf package
+ccap.mkde95 <- st_as_sf(ccap.ud95) %>%
+  separate(id, c("Species", "Date", "Time", "Observer", "SpawnPeriod", "TimeFrame"), sep = "_", remove = F) %>%
+  separate(TimeFrame, c("TimeFrame", "file"), sep = "[.]") %>%
+  select(-file) %>%
+  st_set_crs(32619)
+
+st_write(ccap.mkde95, "ccapHR.shp", append = F)
+
+
+# ccap.rd10.sf <- st_as_sf(ccap.rd10) %>%
+#   separate(id, c("Species", "Date", "Time", "Observer", "SpawnPeriod", "TimeFrame"), sep = "_", remove = F) %>%
+#   separate(TimeFrame, c("TimeFrame", "file"), sep = "[.]") %>%
+#   select(-file) %>%
+#   st_set_crs(32619)
+# 
+# library(purrr)
+# ccap.rd.sum <- ccap.rd10.sf %>%
+#   mutate(N = map_int(geometry, length))
+# 
+# st_write(ccap.rd10.sf, "D:\\PhD\\Manuscripts\\Butterflyfish - Movement&CoralSpawning\\Outputs\\ccapRD10.shp", append = F)
+# 
+# 
+# ccap.id10.sf <- st_as_sf(ccap.id10) %>%
+#   separate(id, c("Species", "Date", "Time", "Observer", "SpawnPeriod", "TimeFrame"), sep = "_", remove = F) %>%
+#   separate(TimeFrame, c("TimeFrame", "file"), sep = "[.]") %>%
+#   select(-file) %>%
+#   st_set_crs(32619)
+# 
+# st_write(ccap.id10.sf, "D:\\PhD\\Manuscripts\\Butterflyfish - Movement&CoralSpawning\\Outputs\\ccapID10.shp", append = F)
+```
+
+Read in Shapefiles for MKDE 95% Home Ranges
+
+```{r}
+CCAPshp <- st_read("ccapHR.shp")
+
+CCAPshp$SpwnPrd <- as.factor(CCAPshp$SpwnPrd)
+CCAPshp$Time <- as.factor(CCAPshp$Time)
+```
+
+Plot HR Areas
+
+```{r}
+GrandBudapest1 <- c("#F1BB7B", "#FD6467", "#5B1A18", "#D67236")
+Royal8 <- c("#899DA4", "#C93312", "#9A8822", "#DC863B", "#F5CDB4", "#F8AFA8", "#FDDDA0", "#74A089")
+
+ccapHR.baseline <- ggplot() +
+  geom_sf(data = CCAPshp %>% filter(SpwnPrd == "Baseline"), aes(fill = id), 
+          color = "black", size = 0.75, alpha = 0.75) +
+  coord_sf(datum = st_crs(32619)) +
+  theme_classic() +
+  scale_x_continuous("Easting (m)", limits = c(577140, 577280), breaks = c(577145, 577210, 577275)) +
+  scale_y_continuous("Northing (m)", limits = c(1338320, 1338460), breaks = c(1338320, 1338355, 1338390, 1338425, 1338460)) +
+  scale_fill_manual(values = Royal8) +
+  theme(axis.title = element_text(size = 12, color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        panel.border = element_rect(color = "#F1BB7B", fill = NA, size = 2),
+        axis.line = element_line(color = "#F1BB7B", size = 1),
+        legend.position = "none")
+ccapHR.baseline
+
+ccapHR.prespawn <- ggplot() +
+  geom_sf(data = CCAPshp %>% filter(SpwnPrd == "Prespawning"), aes(fill = id), 
+          color = "black", size = 0.75, alpha = 0.75) +
+  coord_sf(datum = st_crs(32619)) +
+  theme_classic() +
+  scale_x_continuous("Easting (m)", limits = c(577140, 577280), breaks = c(577145, 577210, 577275)) +
+  scale_y_continuous("Northing (m)", limits = c(1338320, 1338460), breaks = c(1338320, 1338355, 1338390, 1338425, 1338460)) +
+  scale_fill_manual(values = Royal8) +
+  theme(axis.title = element_text(size = 12, color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        panel.border = element_rect(color = "#FD6467", fill = NA, size = 2),
+        axis.line = element_line(color = "#FD6467", size = 1),
+        legend.position = "none")
+ccapHR.prespawn
+
+ccapHR.spawncusp <- ggplot() +
+  geom_sf(data = CCAPshp %>% filter(SpwnPrd == "SpawningCusp"), aes(fill = id), 
+          color = "black", size = 0.75, alpha = 0.75) +
+  coord_sf(datum = st_crs(32619)) +
+  theme_classic() +
+  scale_x_continuous("Easting (m)", limits = c(577140, 577280), breaks = c(577145, 577210, 577275)) +
+  scale_y_continuous("Northing (m)", limits = c(1338320, 1338460), breaks = c(1338320, 1338355, 1338390, 1338425, 1338460)) +
+  scale_fill_manual(values = Royal8) +
+  theme(axis.title = element_text(size = 12, color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        panel.border = element_rect(color = "#D67236", fill = NA, size = 2),
+        axis.line = element_line(color = "#D67236", size = 1),
+        legend.position = "none")
+ccapHR.spawncusp
+
+ccapHR.spawnpeak <- ggplot() +
+  geom_sf(data = CCAPshp %>% filter(SpwnPrd == "SpawningPeak"), aes(fill = id), 
+          color = "black", size = 0.75, alpha = 0.75) +
+  coord_sf(datum = st_crs(32619)) +
+  theme_classic() +
+  scale_x_continuous("Easting (m)", limits = c(577140, 577280), breaks = c(577145, 577210, 577275)) +
+  scale_y_continuous("Northing (m)", limits = c(1338320, 1338460), breaks = c(1338320, 1338355, 1338390, 1338425, 1338460)) +
+  scale_fill_manual(values = Royal8) +
+  theme(axis.title = element_text(size = 12, color = "black"),
+        axis.text = element_text(size = 10, color = "black"),
+        panel.border = element_rect(color = "#5B1A18", fill = NA, size = 2),
+        axis.line = element_line(color = "#5B1A18", size = 1),
+        legend.position = "none")
+ccapHR.spawnpeak
+
+
+HRmaps.p <- ggarrange(NULL, ccapHR.baseline, NULL, ccapHR.prespawn, NULL, ccapHR.spawnpeak, NULL, ccapHR.spawncusp, 
+                      ncol = 4, nrow = 2, widths = c(0.05, 1, 0.05, 1), labels = c("a", "", "b", "", "c", "", "d"), align = "hv",
+                     font.label = list(size = 12, color = "black", face = "plain", family = "Arial"))
+HRmaps.p
+
+ggsave("HRmaps.jpg", plot = HRmaps.p, 
+       type = 'cairo',
+       width = 5.5, height = 4, dpi = 300)
+```
+
+
+## Statistical Analyses ##
+
+First merge track data and home ranges
+```{r}
+ccap.movespace <- ccap.mkde.95 %>%
+  select(c("Time", "SpawnPeriod", "Observer", "HR")) %>%
+  full_join(ccap.tr.sum)
+```
+
+HR Analysis
+
+```{r}
+hr.m <- glmmTMB(data = ccap.movespace, HR ~ SpawnPeriod, family = Gamma(link = "log"))
+
+test.hr.m <- simulateResiduals(fittedModel = hr.m, n = 250, plot = T) #Normal and there is no heteroscedasticity
+plotResiduals(test.hr.m) #looks good
+testDispersion(test.hr.m) #meets dispersion assumptions
+testOutliers(test.hr.m) #outlier test is not significant
+
+#statistical analyses
+#set contrasts for type III unbalanced ANOVA
+options(contrasts = c("contr.sum", "contr.poly"))
+Anova(hr.m, type = 3)
+summary(hr.m)
+```
+
+Analysis of Deviance Table (Type III Wald chisquare tests)
+
+Response: HR
+               Chisq Df Pr(>Chisq)    
+(Intercept) 3370.205  1  < 2.2e-16 ***
+SpawnPeriod   96.012  3  < 2.2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+
+Family: Gamma  ( log )
+Formula:          HR ~ SpawnPeriod
+Data: ccap.movespace
+
+     AIC      BIC   logLik deviance df.resid 
+   263.7    269.6   -126.9    253.7       19 
+
+
+Dispersion estimate for Gamma family (sigma^2): 0.0576 
+
+Conditional model:
+                        Estimate Std. Error z value Pr(>|z|)    
+(Intercept)              4.92596    0.08485   58.05  < 2e-16 ***
+SpawnPeriodPrespawning   0.20618    0.12000    1.72 0.085762 .  
+SpawnPeriodSpawningCusp  0.52751    0.14697    3.59 0.000332 ***
+SpawnPeriodSpawningPeak  1.38594    0.14697    9.43  < 2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+
+Distance Traveled Analysis
+
+```{r}
+dist.m <- glmmTMB(data = ccap.movespace, totaldist ~ SpawnPeriod, family = Gamma(link = "log"))
+
+test.dist.m <- simulateResiduals(fittedModel = dist.m, n = 250, plot = T) #Normal and there is no heteroscedasticity
+plotResiduals(test.dist.m) #looks good
+testDispersion(test.dist.m) #meets dispersion assumptions
+testOutliers(test.dist.m) #outlier test is not significant
+
+#statistical analyses
+#set contrasts for type III unbalanced ANOVA
+options(contrasts = c("contr.sum", "contr.poly"))
+Anova(dist.m, type = 3)
+summary(dist.m)
+```
+
+Analysis of Deviance Table (Type III Wald chisquare tests)
+
+Response: totaldist
+               Chisq Df Pr(>Chisq)    
+(Intercept) 10574.17  1  < 2.2e-16 ***
+SpawnPeriod    29.96  3  1.407e-06 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+
+Family: Gamma  ( log )
+Formula:          totaldist ~ SpawnPeriod
+Data: ccap.movespace
+
+     AIC      BIC   logLik deviance df.resid 
+   262.0    267.9   -126.0    252.0       19 
+
+
+Dispersion estimate for Gamma family (sigma^2): 0.0579 
+
+Conditional model:
+             Estimate Std. Error z value Pr(>|z|)    
+(Intercept)   5.35863    0.05211  102.83  < 2e-16 ***
+SpawnPeriod1 -0.24255    0.07960   -3.05 0.002311 ** 
+SpawnPeriod2 -0.26222    0.07960   -3.29 0.000987 ***
+SpawnPeriod3  0.03579    0.09979    0.36 0.719809    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+ 
+
+## Visitations ##
+
+Read in visitation data and analyze (qualitatively)
+```{r}
+visits <- read.csv("D:\\PhD\\Manuscripts\\Butterflyfish-Movement-Coral-Spawning\\Data\\visitations.csv")
+
+visits.sum <- visits %>%
+  mutate(stony.visits = Ofav_Visits + Oann_Visits + Ofrank_Visits + Acer_Visits + Dlab_Visits + Pstrig_Visits +
+           Ssid_Visits + Ag_Visits + Past_Visits + Mmir_Visits + Mcav_Visits + Cnat_Visits + Efas_Visits,
+         prop.dlab = (Dlab_Visits/stony.visits)*100) %>%
+  group_by(Follow_Type) %>%
+  summarise(mSCV = mean(stony.visits),
+            sdSCV = sd(stony.visits),
+            minSCV = min(stony.visits),
+            maxSCV = max(stony.visits),
+            mDLAB = mean(prop.dlab),
+            sdDLAB = sd(prop.dlab),
+            minDLAB = min(prop.dlab),
+            maxDLAB = max(prop.dlab),
+            mTV = mean(Total_Visits),
+            sdTV = sd(Total_Visits),
+            N = n())
+visits.sum
+```
+
+
+
+
+
+
+
+
