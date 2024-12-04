@@ -1,0 +1,5 @@
+SpawnPeriod,N,Mean (SD) Relocations,Mean (SD) Time (min),Mean (SD) Distance (m)
+Baseline,8,122.88 ± 19,20.34 ± 0.66,166.68 ± 49.96
+Prespawning,8,124.25 ± 22.45,21.31 ± 0.65,163.43 ± 35.42
+SpawningCusp,4,113.75 ± 22.69,20.91 ± 0.46,220.18 ± 75.88
+SpawningPeak,4,114 ± 30.24,21.37 ± 0.5,339.54 ± 80.08

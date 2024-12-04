@@ -421,12 +421,13 @@ ccapHR.baseline <- ggplot() +
   coord_sf(datum = st_crs(32619)) +
   theme_classic() +
   scale_x_continuous("Easting (m)", limits = c(577140, 577280), breaks = c(577145, 577210, 577275)) +
-  scale_y_continuous("Northing (m)", limits = c(1338320, 1338460), breaks = c(1338320, 1338355, 1338390, 1338425, 1338460)) +
+  scale_y_continuous("Northing (m)", limits = c(1338320, 1338460), 
+                     breaks = c(1338320, 1338355, 1338390, 1338425, 1338460)) +
   scale_fill_manual(values = Royal8) +
   theme(axis.title = element_text(size = 12, color = "black"),
         axis.text = element_text(size = 10, color = "black"),
-        panel.border = element_rect(color = "#F1BB7B", fill = NA, size = 2),
-        axis.line = element_line(color = "#F1BB7B", size = 1),
+        panel.border = element_rect(color = "#F1BB7B", fill = NA, linewidth = 2),
+        axis.line = element_line(color = "#F1BB7B", linewidth = 1),
         legend.position = "none")
 ccapHR.baseline
 
@@ -440,8 +441,8 @@ ccapHR.prespawn <- ggplot() +
   scale_fill_manual(values = Royal8) +
   theme(axis.title = element_text(size = 12, color = "black"),
         axis.text = element_text(size = 10, color = "black"),
-        panel.border = element_rect(color = "#FD6467", fill = NA, size = 2),
-        axis.line = element_line(color = "#FD6467", size = 1),
+        panel.border = element_rect(color = "#FD6467", fill = NA, linewidth = 2),
+        axis.line = element_line(color = "#FD6467", linewidth = 1),
         legend.position = "none")
 ccapHR.prespawn
 
@@ -455,8 +456,8 @@ ccapHR.spawncusp <- ggplot() +
   scale_fill_manual(values = Royal8) +
   theme(axis.title = element_text(size = 12, color = "black"),
         axis.text = element_text(size = 10, color = "black"),
-        panel.border = element_rect(color = "#D67236", fill = NA, size = 2),
-        axis.line = element_line(color = "#D67236", size = 1),
+        panel.border = element_rect(color = "#D67236", fill = NA, linewidth = 2),
+        axis.line = element_line(color = "#D67236", linewidth = 1),
         legend.position = "none")
 ccapHR.spawncusp
 
@@ -470,12 +471,12 @@ ccapHR.spawnpeak <- ggplot() +
   scale_fill_manual(values = Royal8) +
   theme(axis.title = element_text(size = 12, color = "black"),
         axis.text = element_text(size = 10, color = "black"),
-        panel.border = element_rect(color = "#5B1A18", fill = NA, size = 2),
-        axis.line = element_line(color = "#5B1A18", size = 1),
+        panel.border = element_rect(color = "#5B1A18", fill = NA, linewidth = 2),
+        axis.line = element_line(color = "#5B1A18", linewidth = 1),
         legend.position = "none")
 ccapHR.spawnpeak
 
-
+library(ggpubr)
 HRmaps.p <- ggarrange(NULL, ccapHR.baseline, NULL, ccapHR.prespawn, NULL, ccapHR.spawnpeak, NULL, ccapHR.spawncusp, 
                       ncol = 4, nrow = 2, widths = c(0.05, 1, 0.05, 1), labels = c("a", "", "b", "", "c", "", "d"), align = "hv",
                      font.label = list(size = 12, color = "black", face = "plain", family = "Arial"))
@@ -491,10 +492,57 @@ ggsave("HRmaps.jpg", plot = HRmaps.p,
 
 First merge track data and home ranges
 ```{r}
+Ordering <- data.frame(Order = c(1, 2, 3, 4),
+                       SpawnPeriod = c("Baseline", "Prespawning", "SpawningPeak", "SpawningCusp"))
+
 ccap.movespace <- ccap.mkde.95 %>%
   select(c("Time", "SpawnPeriod", "Observer", "HR")) %>%
-  full_join(ccap.tr.sum)
+  full_join(ccap.tr.sum) %>%
+  mutate(Ratio = totaldist/HR) %>%
+  left_join(Ordering)
 ```
+
+
+Correlation between total distance and home range area
+
+```{r}
+cor.test(ccap.movespace$totaldist, ccap.movespace$HR)
+
+ccap.movespace2 <- ccap.movespace
+ccap.movespace2$SpawnPeriod <- factor(ccap.movespace2$SpawnPeriod, 
+                                      levels=c('Baseline', 'Prespawning', 'SpawningPeak', 'SpawningCusp'))
+
+corr.p <- ggplot(data = ccap.movespace2, aes(x = totaldist, y = HR)) + 
+  geom_point(aes(color = SpawnPeriod), size = 2) +
+  geom_smooth(method=lm , color = "gray35", se = F, linewidth = 1) +
+  labs(
+    x = "Distance Traveled (m)",
+    y = expression(paste("Space Use (m " ^2,")")),
+    color = "Spawning Period"
+  ) +
+  scale_color_manual(labels = c("Baseline", "Pre-Spawning", "Peak Spawning", "Cusp Spawning"),
+                     values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete")) +
+  theme_classic() +
+  theme(text = element_text(color = "black"),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12))
+corr.p
+
+ggsave("Dist-HR_corr.png", plot = corr.p,
+       width = 6.5, height = 4, dpi = 300)
+```
+
+Pearson's product-moment correlation
+
+data:  totaldist and HR
+t = 5.8846, df = 22, p-value = 6.383e-06
+alternative hypothesis: true correlation is not equal to 0
+95 percent confidence interval:
+ 0.5530496 0.9011231
+sample estimates:
+      cor 
+0.7819864 
+
 
 HR Analysis
 
@@ -511,17 +559,61 @@ testOutliers(test.hr.m) #outlier test is not significant
 options(contrasts = c("contr.sum", "contr.poly"))
 Anova(hr.m, type = 3)
 summary(hr.m)
+
+# Generate predictions based on model coefficients for each SpawnPeriod level
+spawn_period_levels <- data.frame(SpawnPeriod = unique(ccap.movespace$SpawnPeriod))
+
+# Get predictions and standard errors for the new data frame
+predictions.hr <- predict(hr.m, newdata = spawn_period_levels, type = "link", se.fit = TRUE)
+
+# Exponentiate the predictions to get them back to the original scale (raw scale)
+predicted_hr <- exp(predictions.hr$fit)
+SE_hr <- exp(predictions.hr$se.fit)
+lowerCI_hr <- exp(predictions.hr$fit - (1.96 * predictions.hr$se.fit))
+upperCI_hr <- exp(predictions.hr$fit + (1.96 * predictions.hr$se.fit))
+
+# Combine predictions with their standard errors
+predicted_hr_data <- data.frame(
+  SpawnPeriod = spawn_period_levels$SpawnPeriod,
+  Predicted = predicted_hr,
+  SE = SE_hr,
+  Lower = lowerCI_hr,
+  Upper = upperCI_hr
+)
+
+# Plot the predicted totaldist for each SpawnPeriod
+hr.p2 <- ggplot(predicted_hr_data %>%
+  mutate(name = factor(SpawnPeriod, levels = c("Baseline", "Prespawning", "SpawningPeak", "SpawningCusp"))),
+  aes(x = name, y = Predicted)) +
+  geom_point(aes(color = name), size = 2) +  # Plot the predicted values as points
+  geom_errorbar(aes(ymin = Lower, ymax = Upper, color = name), 
+                linewidth = 0.5, width = 0) + # Add error bars for SE
+  geom_jitter(data = ccap.movespace, aes(x = SpawnPeriod, y = HR), 
+              size = 1, shape = 1, alpha = 0.5, width = 0.2) +
+  labs(
+    x = "Spawning Period",
+    y = expression(paste("Space Use (m " ^2,")"))
+  ) +
+  scale_x_discrete(labels=c("Baseline" = "BL",
+                            "Prespawning" = "PR", 
+                            "SpawningCusp" = "CS",
+                            "SpawningPeak" = "PS")) +
+  scale_color_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete")) +
+  theme_classic() +
+  theme(legend.position = "none",
+        text = element_text(color = "black"),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12))
+hr.p2
 ```
 
 Analysis of Deviance Table (Type III Wald chisquare tests)
-
 Response: HR
-               Chisq Df Pr(>Chisq)    
-(Intercept) 3370.205  1  < 2.2e-16 ***
-SpawnPeriod   96.012  3  < 2.2e-16 ***
+                Chisq Df Pr(>Chisq)    
+(Intercept) 11024.748  1  < 2.2e-16 ***
+SpawnPeriod    96.012  3  < 2.2e-16 ***
 ---
 Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-
 
 
 Family: Gamma  ( log )
@@ -535,11 +627,11 @@ Data: ccap.movespace
 Dispersion estimate for Gamma family (sigma^2): 0.0576 
 
 Conditional model:
-                        Estimate Std. Error z value Pr(>|z|)    
-(Intercept)              4.92596    0.08485   58.05  < 2e-16 ***
-SpawnPeriodPrespawning   0.20618    0.12000    1.72 0.085762 .  
-SpawnPeriodSpawningCusp  0.52751    0.14697    3.59 0.000332 ***
-SpawnPeriodSpawningPeak  1.38594    0.14697    9.43  < 2e-16 ***
+              Estimate Std. Error z value Pr(>|z|)    
+(Intercept)   5.455865   0.051961  105.00  < 2e-16 ***
+SpawnPeriod1 -0.529907   0.079372   -6.68 2.45e-11 ***
+SpawnPeriod2 -0.323725   0.079372   -4.08 4.53e-05 ***
+SpawnPeriod3 -0.002404   0.099498   -0.02    0.981    
 ---
 Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
@@ -560,17 +652,61 @@ testOutliers(test.dist.m) #outlier test is not significant
 options(contrasts = c("contr.sum", "contr.poly"))
 Anova(dist.m, type = 3)
 summary(dist.m)
+
+# Generate predictions based on model coefficients for each SpawnPeriod level
+spawn_period_levels <- data.frame(SpawnPeriod = unique(ccap.movespace$SpawnPeriod))
+
+# Get predictions and standard errors for the new data frame
+predictions.dist <- predict(dist.m, newdata = spawn_period_levels, type = "link", se.fit = TRUE)
+
+# Exponentiate the predictions to get them back to the original scale (raw scale)
+predicted_dist <- exp(predictions.dist$fit)
+SE_dist <- exp(predictions.dist$se.fit)
+lowerCI_dist <- exp(predictions.dist$fit - (1.96 * predictions.dist$se.fit))
+upperCI_dist <- exp(predictions.dist$fit + (1.96 * predictions.dist$se.fit))
+
+# Combine predictions with their standard errors
+predicted_dist_data <- data.frame(
+  SpawnPeriod = spawn_period_levels$SpawnPeriod,
+  Predicted = predicted_dist,
+  SE = SE_dist,
+  Lower = lowerCI_dist,
+  Upper = upperCI_dist
+)
+
+# Plot the predicted totaldist for each SpawnPeriod
+dist.p2 <- ggplot(predicted_dist_data %>%
+  mutate(name = factor(SpawnPeriod, levels = c("Baseline", "Prespawning", "SpawningPeak", "SpawningCusp"))),
+  aes(x = name, y = Predicted)) +
+  geom_point(aes(color = name), size = 2) +  # Plot the predicted values as points
+  geom_errorbar(aes(ymin = Lower, ymax = Upper, color = name), 
+                linewidth = 0.5, width = 0) + # Add error bars for SE
+  geom_jitter(data = ccap.movespace, aes(x = reorder(SpawnPeriod, Order), y = totaldist), 
+              size = 1, shape = 1, alpha = 0.5, width = 0.2) +
+  labs(
+    x = "Spawning Period",
+    y = "Distance Traveled (m)"
+  ) +
+  scale_x_discrete(labels=c("Baseline" = "BL",
+                            "Prespawning" = "PR", 
+                            "SpawningCusp" = "CS",
+                            "SpawningPeak" = "PS")) +
+  scale_color_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete")) +
+  theme_classic() +
+  theme(legend.position = "none",
+        text = element_text(color = "black"),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12))
+dist.p2
 ```
 
 Analysis of Deviance Table (Type III Wald chisquare tests)
-
 Response: totaldist
                Chisq Df Pr(>Chisq)    
 (Intercept) 10574.17  1  < 2.2e-16 ***
 SpawnPeriod    29.96  3  1.407e-06 ***
 ---
 Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-
 
 
 Family: Gamma  ( log )
@@ -591,7 +727,177 @@ SpawnPeriod2 -0.26222    0.07960   -3.29 0.000987 ***
 SpawnPeriod3  0.03579    0.09979    0.36 0.719809    
 ---
 Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
- 
+
+
+
+## Path toruosity using the straightness index
+
+```{r}
+# Function to calculate straightness index for each trajectory
+calculate_straightness <- function(traj) {
+  # Extract the coordinates of the trajectory
+  coords <- as.data.frame(traj)  # Convert trajectory to a dataframe
+  x <- coords$x
+  y <- coords$y
+  
+  # Calculate the straight-line distance between the start and end points
+  start_point <- c(x[1], y[1])
+  end_point <- c(x[length(x)], y[length(y)])
+  straight_line_dist <- sqrt((end_point[1] - start_point[1])^2 + (end_point[2] - start_point[2])^2)
+  
+  # Calculate the total distance (sum of consecutive distances between points)
+  total_dist <- sum(sqrt(diff(x)^2 + diff(y)^2))
+  
+  # Calculate straightness index (straight line distance / total distance)
+  straightness_index <- straight_line_dist / total_dist
+  
+  return(straightness_index)
+}
+
+# Apply the function to each trajectory in the ltraj list using lapply
+straightness_indices <- sapply(ccap.tr, function(t) calculate_straightness(t))
+
+# Create an ID for each trajectory and add to a dataframe with the straightness indices
+straight <- data.frame(ID = id(ccap.tr), Straightness = straightness_indices) %>%
+  separate(ID, c("Species", "Date", "Time", "Observer", "SpawnPeriod", "TimeFrame"), sep = "_", remove = F) %>%
+  separate(TimeFrame, c("TimeFrame", "file"), sep = "[.]") %>%
+  select(-file) %>%
+  left_join(Ordering)
+
+straight.sum <- straight %>%
+  group_by(SpawnPeriod) %>%
+  summarise(N = n(),
+            Mean = mean(Straightness),
+            SD = sd(Straightness))
+straight.sum
+
+straight.p <- ggplot(straight %>%
+  mutate(name = factor(SpawnPeriod, levels = c("Baseline", "Prespawning", "SpawningPeak", "SpawningCusp"))),
+  aes(x = name, y = Straightness, color = name, fill = name)) +
+  geom_boxplot(outlier.size = 1, size = 0.5, alpha = 0.25) +
+  geom_point() +
+  theme_classic(base_family = "Arial") +
+  labs(x = "", y = expression(paste("Straightness Index"))) +
+  theme(text = element_text(color = "black"),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12),
+        legend.position = "none") +
+  scale_x_discrete(labels=c("Baseline" = "Baseline",
+                            "Prespawning" = "Pre-spawn",
+                            "SpawningPeak" = "Peak Spawn", 
+                            "SpawningCusp" = "Cusp Spawn")) +
+  scale_color_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete")) +
+  scale_fill_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete"))
+straight.p
+```
+
+Analysis
+
+```{r}
+straight.m <- glmmTMB(data = straight, Straightness ~ SpawnPeriod, family = beta_family(link = "logit"))
+
+test.straight.m <- simulateResiduals(fittedModel = straight.m, n = 250, plot = T) #Normal and there is no heteroscedasticity
+plotResiduals(test.straight.m) #looks good
+testDispersion(test.straight.m) #meets dispersion assumptions
+testOutliers(test.straight.m) #outlier test is not significant
+
+#statistical analyses
+#set contrasts for type III unbalanced ANOVA
+options(contrasts = c("contr.sum", "contr.poly"))
+Anova(straight.m, type = 3)
+summary(straight.m)
+
+# Generate predictions based on model coefficients for each SpawnPeriod level
+spawn_period_levels <- data.frame(SpawnPeriod = unique(ccap.movespace$SpawnPeriod))
+
+# Get predictions and standard errors for the new data frame
+predictions.straight <- predict(straight.m, newdata = spawn_period_levels, type = "link", se.fit = TRUE)
+
+# Exponentiate the predictions to get them back to the original scale (raw scale)
+predicted_straight <- exp(predictions.straight$fit)
+SE_straight <- exp(predictions.straight$se.fit)
+lowerCI_straight <- exp(predictions.straight$fit - (1.96 * predictions.straight$se.fit))
+upperCI_straight <- exp(predictions.straight$fit + (1.96 * predictions.straight$se.fit))
+
+# Combine predictions with their standard errors
+predicted_straight_data <- data.frame(
+  SpawnPeriod = spawn_period_levels$SpawnPeriod,
+  Predicted = predicted_straight,
+  SE = SE_straight,
+  Lower = lowerCI_straight,
+  Upper = upperCI_straight
+)
+
+# Plot the predicted Straightness Index for each SpawnPeriod
+straight.p2 <- ggplot(predicted_straight_data %>%
+  mutate(name = factor(SpawnPeriod, levels = c("Baseline", "Prespawning", "SpawningPeak", "SpawningCusp"))),
+  aes(x = name, y = Predicted)) +
+  geom_point(aes(color = name), size = 2) +  # Plot the predicted values as points
+  geom_errorbar(aes(ymin = Lower, ymax = Upper, color = name), 
+                linewidth = 0.5, width = 0) + # Add error bars for SE
+  geom_jitter(data = straight, aes(x = reorder(SpawnPeriod, Order), y = Straightness), 
+              size = 1, shape = 1, alpha = 0.5, width = 0.2) +
+  labs(
+    x = "Spawning Period",
+    y = "Straightness Index"
+  ) +
+  scale_x_discrete(labels=c("Baseline" = "BL",
+                            "Prespawning" = "PR", 
+                            "SpawningCusp" = "CS",
+                            "SpawningPeak" = "PS")) +
+  scale_color_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete")) +
+  theme_classic() +
+  theme(legend.position = "none",
+        text = element_text(color = "black"),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12))
+straight.p2
+``` 
+
+Analysis of Deviance Table (Type III Wald chisquare tests)
+Response: Straightness
+               Chisq Df Pr(>Chisq)    
+(Intercept) 526.4764  1    < 2e-16 ***
+SpawnPeriod   7.1692  3    0.06669 .  
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+Family: beta  ( logit )
+Formula:          Straightness ~ SpawnPeriod
+Data: straight
+
+     AIC      BIC   logLik deviance df.resid 
+   -95.2    -89.3     52.6   -105.2       19 
+
+
+Dispersion parameter for beta family (): 55.9 
+
+Conditional model:
+             Estimate Std. Error z value Pr(>|z|)    
+(Intercept)   -2.7949     0.1218 -22.945   <2e-16 ***
+SpawnPeriod1  -0.2305     0.1846  -1.248    0.212    
+SpawnPeriod2  -0.1310     0.1805  -0.726    0.468    
+SpawnPeriod3  -0.1454     0.2292  -0.634    0.526    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+## New plot for manuscript
+
+```{r}
+dist.HR.straight.p <- ggarrange(dist.p2 + rremove("xlab"), 
+                                hr.p2 + rremove("xlab"), 
+                                straight.p2 + rremove("xlab"), 
+                                ncol = 3, nrow = 1, labels = c("a", "b", "c"), align = "h",
+                     font.label = list(size = 12, color = "black", face = "plain"))
+dist.HR.straight.p
+
+ggsave("DistHRStraight.png", plot = dist.HR.straight.p,
+       width = 6.5, height = 4, dpi = 300)
+```
+
+
 
 ## Visitations ##
 
@@ -602,18 +908,17 @@ visits <- read.csv("D:\\PhD\\Manuscripts\\Butterflyfish-Movement-Coral-Spawning\
 visits.sum <- visits %>%
   mutate(stony.visits = Ofav_Visits + Oann_Visits + Ofrank_Visits + Acer_Visits + Dlab_Visits + Pstrig_Visits +
            Ssid_Visits + Ag_Visits + Past_Visits + Mmir_Visits + Mcav_Visits + Cnat_Visits + Efas_Visits,
+         prop.stony = (stony.visits/Total_Visits)*100,
          prop.dlab = (Dlab_Visits/stony.visits)*100) %>%
   group_by(Follow_Type) %>%
-  summarise(mSCV = mean(stony.visits),
-            sdSCV = sd(stony.visits),
-            minSCV = min(stony.visits),
-            maxSCV = max(stony.visits),
+  summarise(mSCV = mean(prop.stony),
+            sdSCV = sd(prop.stony),
+            minSCV = min(prop.stony),
+            maxSCV = max(prop.stony),
             mDLAB = mean(prop.dlab),
             sdDLAB = sd(prop.dlab),
             minDLAB = min(prop.dlab),
             maxDLAB = max(prop.dlab),
-            mTV = mean(Total_Visits),
-            sdTV = sd(Total_Visits),
             N = n())
 visits.sum
 ```

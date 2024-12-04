@@ -1,0 +1,5 @@
+SpawnPeriod,N,HR
+Baseline,8,137.82 ± 43.44
+Prespawning,8,169.38 ± 26.78
+SpawningCusp,4,233.57 ± 62.31
+SpawningPeak,4,551.09 ± 186.44
