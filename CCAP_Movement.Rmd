@@ -27,6 +27,7 @@ Plotting
 Remember you need to load your Google API key to use ggmap and ggmap styles
 ```{r}
 library(ggplot2) # tidyverse vis package
+library(ggpubr) #making publication quality plots
 library(ggmap) #use this for plotting maps
 library(ggspatial) #add scale bar and north arrow
 library(sf)
@@ -149,11 +150,11 @@ library(ggpubr)
 for(i in unique(ccap.sf$ID)){
   glat <- ggplot(aes(x = time, y = Latitude), data = subset(ccap.sf, ID == i)) +
     geom_line(color = "black") +
-    labs(y = "Northing", y = "") +
+    labs(y = "Northing (m)", y = "") +
     theme_classic()
   glon <- ggplot(aes(x = time, y = Longitude), data = subset(ccap.sf, ID == i)) +
     geom_line(color = "black") +
-    labs(y = "Easting", x = "Time (UTC)") +
+    labs(y = "Easting (m)", x = "Time (UTC)") +
     theme_classic()
   gi <- ggarrange(glat, glon,
                      ncol = 1, nrow = 2, align = "v",
@@ -330,8 +331,7 @@ HR.p <- ggplot(ccap.mkde.95 %>%
   scale_fill_manual(values = wes_palette(name = "GrandBudapest1", n = 4, type = "discrete"))
 HR.p
 
-ggsave("HRsize.png", plot = HR.p, 
-       type = 'cairo',
+ggsave("HRsize.png", plot = HR.p,
        width = 4.5, height = 3.5, dpi = 300)
 
 
@@ -341,7 +341,6 @@ dist.HR.p <- ggarrange(dist.p, HR.p, ncol = 1, nrow = 2, labels = c("a", "b"), a
 dist.HR.p
 
 ggsave("DistHR.png", plot = dist.HR.p, 
-       type = 'cairo',
        width = 4.5, height = 5.5, dpi = 300)
 ```
 
@@ -483,7 +482,6 @@ HRmaps.p <- ggarrange(NULL, ccapHR.baseline, NULL, ccapHR.prespawn, NULL, ccapHR
 HRmaps.p
 
 ggsave("HRmaps.jpg", plot = HRmaps.p, 
-       type = 'cairo',
        width = 5.5, height = 4, dpi = 300)
 ```
 
