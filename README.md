@@ -1,5 +1,7 @@
 # ButterflyfishMovement-CoralSpawning
 
+https://zenodo.org/doi/10.5281/zenodo.13750129
+
 This git contains raw GPS data (24 .gpx files) and data on visitation to corals and other substrates to investigate the movement and space use by butterflyfish during a coral spawning event on a coral reef in Bonaire, Netherlands in June/July 2021.
 
 The raw data were processed, visualized, and analyzed in the RMarkdown file CCAP_Movement.rmd
